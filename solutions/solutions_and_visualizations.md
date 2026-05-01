@@ -90,13 +90,14 @@ Understanding monthly order trends based on order volume over time is crucial fo
 ```SQL
 SELECT month, total_orders
 FROM (
-    SELECT 
-        TO_CHAR(DATE_TRUNC('month', order_date), 'YYYY-MON') AS month,
+    SELECT
+        DATE_FORMAT(order_date, '%Y-%b') AS month,
+        DATE_FORMAT(order_date, '%Y-%m-01') AS month_sort,
         COUNT(*) AS total_orders
     FROM orders
-    GROUP BY DATE_TRUNC('month', order_date)
+    GROUP BY DATE_FORMAT(order_date, '%Y-%b'), DATE_FORMAT(order_date, '%Y-%m-01')
 ) AS sub
-ORDER BY TO_DATE(month, 'YYYY-MON');
+ORDER BY month_sort;
 ```
 This SQL query calculates the monthly order trends by counting the total number of orders placed in each month. It first truncates the order_date to the first day of each month and formats it as 'YYYY-MON' to create a readable label for each month. Then, it groups the data by these month labels and counts the number of orders in each group. Finally, it orders the results chronologically by converting the formatted month strings back into date objects using TO_DATE. This allows businesses to observe how order volumes change over time, identify seasonal patterns, and make informed decisions related to marketing, inventory, and staffing based on fluctuations in customer demand.
 
@@ -146,7 +147,7 @@ Identifying the top 5 most popular cuisines by order volume is vital for underst
 
 ## Solution
 ```SQL
-SELECT m.cuisine, COUNT(o.*) AS order_count
+SELECT m.cuisine, COUNT(*) AS order_count
 FROM orders o
 JOIN menu m ON o.r_id = m.r_id
 GROUP BY m.cuisine
@@ -270,13 +271,18 @@ WITH user_spending AS (
     FROM orders
     GROUP BY user_id
 ),
-percentile_value AS (
-    SELECT PERCENTILE_CONT(0.99) WITHIN GROUP (ORDER BY total_spent) AS threshold
+ranked AS (
+    SELECT
+        user_id,
+        total_spent,
+        ROW_NUMBER() OVER (ORDER BY total_spent) AS rn,
+        COUNT(*) OVER ()                          AS total_count
     FROM user_spending
 )
-SELECT us.user_id, us.total_spent
-FROM user_spending us, percentile_value p
-WHERE us.total_spent > p.threshold
+SELECT user_id, total_spent
+FROM ranked
+WHERE rn > FLOOR(0.99 * total_count)
+ORDER BY total_spent DESC
 LIMIT 15;
 ```
 This SQL query identifies the top 1% of highest-spending users and then selects the top 15 among them based on total spending. It begins by creating a Common Table Expression (CTE) named `user_spending`, which calculates the total amount each user has spent by summing the `sales_amount` from the `orders` table and grouping the data by `user_id`. The second CTE, `percentile_value`, calculates the 99th percentile of user spending using the `PERCENTILE_CONT(0.99)` function, which determines the spending threshold that separates the top 1% of users from the rest. In the final query, it selects users from the `user_spending` CTE whose `total_spent` exceeds this threshold, meaning they belong to the top 1% of spenders. The `LIMIT 15` clause then restricts the output to the top 15 users from this elite group. This approach helps pinpoint the most valuable customers based on spending behavior.
@@ -453,13 +459,13 @@ This question is significant in business intelligence because identifying the da
 
 ## Solution
 ```SQL
-SELECT 
-  TRIM(TO_CHAR(order_date, 'Day')) AS weekday,
-  EXTRACT(DOW FROM order_date) AS weekday_num,
-  COUNT(*) AS total_orders,
-  SUM(sales_amount) AS total_sales
+SELECT
+    DAYNAME(order_date)   AS weekday,
+    DAYOFWEEK(order_date) AS weekday_num,
+    COUNT(*)              AS total_orders,
+    SUM(sales_amount)     AS total_sales
 FROM orders
-GROUP BY weekday, weekday_num
+GROUP BY DAYNAME(order_date), DAYOFWEEK(order_date)
 ORDER BY weekday_num;
 ```
 This SQL query analyzes restaurant order activity by day of the week to identify peak ordering trends. It selects data from the `orders` table and extracts two key pieces of information from the `order_date`: the name of the weekday using `TO_CHAR(order_date, 'Day')` (trimmed of extra spaces) and the numeric day of the week using EXTRACT(DOW FROM order_date) (where Sunday = 0 and Saturday = 6). It then counts the total number of orders `(COUNT(*))` and calculates the total sales `(SUM(sales_amount))` for each day. The data is grouped by both the weekday name and number to ensure accurate aggregation and ordering. Finally, the results are sorted by `weekday_num` so that the days appear in calendar order from Sunday to Saturday, making it easy to spot trends and identify peak order days.
@@ -484,9 +490,9 @@ This question is significant because understanding how order frequency varies ac
 
 ## Solution
 ```SQL
-SELECT 
-  u.Monthly_Income, 
-  COUNT(o.*) AS order_count
+SELECT
+    u.Monthly_Income,
+    COUNT(*) AS order_count
 FROM users u
 JOIN orders o ON u.user_id = o.user_id
 GROUP BY u.Monthly_Income
